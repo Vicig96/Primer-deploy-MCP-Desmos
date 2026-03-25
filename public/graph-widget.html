@@ -20,7 +20,7 @@
 
       #layout {
         display: grid;
-        grid-template-columns: 1.5fr 1fr;
+        grid-template-columns: 1.6fr 1fr;
         gap: 12px;
         align-items: start;
       }
@@ -40,7 +40,7 @@
 
       #calculator {
         width: 100%;
-        height: 520px;
+        height: 540px;
         border-radius: 12px;
         overflow: hidden;
       }
@@ -58,7 +58,7 @@
 
       #summary {
         margin: 0 0 10px 0;
-        line-height: 1.4;
+        line-height: 1.45;
         color: #111827;
       }
 
@@ -74,9 +74,33 @@
       .muted {
         color: #6b7280;
       }
+
+      #legend {
+        display: grid;
+        gap: 8px;
+      }
+
+      .legend-item {
+        display: grid;
+        grid-template-columns: 16px 1fr;
+        gap: 8px;
+        align-items: center;
+      }
+
+      .legend-color {
+        width: 16px;
+        height: 16px;
+        border-radius: 999px;
+        border: 1px solid #d1d5db;
+      }
+
+      .legend-text {
+        font-size: 14px;
+        word-break: break-word;
+      }
     </style>
 
-    <script src="https://www.desmos.com/api/v1.11/calculator.js?apiKey=TU_API_KEY_DESMOS&lang=es"></script>
+    <script src="https://www.desmos.com/api/v1.11/calculator.js?apiKey=d88e669a4d98463499db0b986f441223&lang=es"></script>
   </head>
   <body>
     <div id="wrap">
@@ -95,6 +119,11 @@
           <ul id="points">
             <li class="muted">Aquí aparecerán los puntos clave.</li>
           </ul>
+
+          <h3>Leyenda</h3>
+          <div id="legend">
+            <div class="muted">Aquí aparecerán las expresiones representadas.</div>
+          </div>
         </div>
       </div>
     </div>
@@ -104,12 +133,27 @@
       const statusEl = document.getElementById("status");
       const summaryEl = document.getElementById("summary");
       const pointsEl = document.getElementById("points");
+      const legendEl = document.getElementById("legend");
       const calculatorEl = document.getElementById("calculator");
 
+      const defaultPalette = [
+        "#c74440",
+        "#2d70b3",
+        "#388c46",
+        "#6042a6",
+        "#000000",
+        "#fa7e19",
+        "#7f4f24",
+        "#118ab2"
+      ];
+
       let calculator = null;
+
       let currentData = {
         title: "Gráfica",
-        latex: "y=x^2",
+        expressions: [
+          { id: "expr_1", latex: "y=x^2", color: "#c74440", hidden: false }
+        ],
         summary: "",
         keyPoints: []
       };
@@ -121,14 +165,75 @@
         return calculator;
       }
 
-      function renderGraph(latex) {
+      function normalizeExpressions(source) {
+        const rawExpressions =
+          Array.isArray(source?.expressions) && source.expressions.length > 0
+            ? source.expressions
+            : source?.latex
+              ? [{ id: "expr_1", latex: source.latex, color: "#c74440", hidden: false }]
+              : [{ id: "expr_1", latex: "y=x^2", color: "#c74440", hidden: false }];
+
+        return rawExpressions
+          .filter((expr) => expr && typeof expr.latex === "string" && expr.latex.trim())
+          .map((expr, index) => ({
+            id: expr.id || `expr_${index + 1}`,
+            latex: expr.latex.trim(),
+            color: expr.color || defaultPalette[index % defaultPalette.length],
+            hidden: Boolean(expr.hidden)
+          }));
+      }
+
+      function renderGraph(expressions) {
         const calc = ensureCalculator();
-        calc.setExpression({ id: "main", latex });
+        const validExpressions = normalizeExpressions({ expressions });
+
+        calc.setBlank();
+        calc.setExpressions(
+          validExpressions.map((expr) => ({
+            id: expr.id,
+            latex: expr.latex,
+            color: expr.color,
+            hidden: expr.hidden
+          }))
+        );
+      }
+
+      function renderLegend(expressions) {
+        legendEl.innerHTML = "";
+
+        const visibleExpressions = expressions.filter((expr) => !expr.hidden);
+
+        if (visibleExpressions.length === 0) {
+          const div = document.createElement("div");
+          div.textContent = "No hay expresiones visibles.";
+          div.classList.add("muted");
+          legendEl.appendChild(div);
+          return;
+        }
+
+        visibleExpressions.forEach((expr) => {
+          const item = document.createElement("div");
+          item.className = "legend-item";
+
+          const color = document.createElement("div");
+          color.className = "legend-color";
+          color.style.background = expr.color;
+
+          const text = document.createElement("div");
+          text.className = "legend-text";
+          text.textContent = expr.latex;
+
+          item.appendChild(color);
+          item.appendChild(text);
+          legendEl.appendChild(item);
+        });
       }
 
       function renderInfo(data) {
         titleEl.textContent = data.title || "Gráfica";
-        statusEl.textContent = `Mostrando: ${data.latex || "y=x^2"}`;
+
+        const count = Array.isArray(data.expressions) ? data.expressions.length : 0;
+        statusEl.textContent = `Mostrando ${count} expresión(es)`;
 
         if (data.summary && data.summary.trim()) {
           summaryEl.textContent = data.summary;
@@ -151,11 +256,14 @@
           li.classList.add("muted");
           pointsEl.appendChild(li);
         }
+
+        renderLegend(normalizeExpressions(data));
       }
 
       function renderAll() {
-        renderGraph(currentData.latex || "y=x^2");
-        renderInfo(currentData);
+        const expressions = normalizeExpressions(currentData);
+        renderGraph(expressions);
+        renderInfo({ ...currentData, expressions });
       }
 
       function updateFromResponse(response) {
@@ -163,7 +271,7 @@
 
         currentData = {
           title: sc.title || "Gráfica",
-          latex: sc.latex || sc.expression || "y=x^2",
+          expressions: normalizeExpressions(sc),
           summary: sc.summary || "",
           keyPoints: Array.isArray(sc.keyPoints) ? sc.keyPoints : []
         };
@@ -215,7 +323,7 @@
 
       async function initializeBridge() {
         await rpcRequest("ui/initialize", {
-          appInfo: { name: "desmos-widget", version: "0.2.0" },
+          appInfo: { name: "desmos-widget", version: "0.3.0" },
           appCapabilities: {},
           protocolVersion: "2026-01-26"
         });

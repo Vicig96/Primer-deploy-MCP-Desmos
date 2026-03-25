@@ -11,8 +11,37 @@ import { z } from "zod";
 
 const widgetHtml = readFileSync("public/graph-widget.html", "utf8");
 
+const defaultPalette = [
+  "#c74440",
+  "#2d70b3",
+  "#388c46",
+  "#6042a6",
+  "#000000",
+  "#fa7e19",
+  "#7f4f24",
+  "#118ab2",
+];
+
+function normalizeExpressionsFromArgs(args) {
+  const rawExpressions =
+    Array.isArray(args?.expressions) && args.expressions.length > 0
+      ? args.expressions
+      : typeof args?.latex === "string" && args.latex.trim()
+        ? [{ id: "expr_1", latex: args.latex.trim() }]
+        : [{ id: "expr_1", latex: "y=x^2" }];
+
+  return rawExpressions
+    .filter((expr) => expr && typeof expr.latex === "string" && expr.latex.trim())
+    .map((expr, index) => ({
+      id: expr.id || `expr_${index + 1}`,
+      latex: expr.latex.trim(),
+      color: expr.color || defaultPalette[index % defaultPalette.length],
+      hidden: Boolean(expr.hidden),
+    }));
+}
+
 function createGraphServer() {
-  const server = new McpServer({ name: "desmos-graph-app", version: "0.2.0" });
+  const server = new McpServer({ name: "desmos-graph-app", version: "0.3.0" });
 
   registerAppResource(
     server,
@@ -27,14 +56,14 @@ function createGraphServer() {
           text: widgetHtml,
           _meta: {
             "openai/widgetDescription":
-              "Muestra una gráfica interactiva en Desmos y, si se proporcionan, un resumen y puntos clave.",
+              "Muestra una gráfica interactiva en Desmos con una o varias expresiones, resumen, puntos clave y leyenda.",
             "openai/widgetPrefersBorder": true,
             "openai/widgetCSP": {
-              resource_domains: ["https://www.desmos.com"]
-            }
-          }
-        }
-      ]
+              resource_domains: ["https://www.desmos.com"],
+            },
+          },
+        },
+      ],
     })
   );
 
@@ -44,36 +73,46 @@ function createGraphServer() {
     {
       title: "Graficar expresión",
       description:
-        "Muestra una función o ecuación en Desmos dentro del chat. Puede incluir título, resumen y puntos clave.",
+        "Muestra una o varias funciones o ecuaciones en Desmos dentro del chat.",
       inputSchema: {
-        latex: z.string().min(1),
         title: z.string().optional(),
         summary: z.string().optional(),
-        keyPoints: z.array(z.string()).optional()
+        keyPoints: z.array(z.string()).optional(),
+        latex: z.string().optional(),
+        expressions: z
+          .array(
+            z.object({
+              id: z.string().optional(),
+              latex: z.string().min(1),
+              color: z.string().optional(),
+              hidden: z.boolean().optional(),
+            })
+          )
+          .optional(),
       },
       _meta: {
-        ui: { resourceUri: "ui://widget/graph.html" }
-      }
+        ui: { resourceUri: "ui://widget/graph.html" },
+      },
     },
     async (args) => {
-      const latex = args?.latex?.trim?.() || "y=x^2";
       const title = args?.title?.trim?.() || "Gráfica";
       const summary = args?.summary?.trim?.() || "";
       const keyPoints = Array.isArray(args?.keyPoints) ? args.keyPoints : [];
+      const expressions = normalizeExpressionsFromArgs(args);
 
       return {
         content: [
           {
             type: "text",
-            text: `Mostrando la gráfica de ${latex}`
-          }
+            text: `Mostrando ${expressions.length} expresión(es) en Desmos`,
+          },
         ],
         structuredContent: {
           title,
-          latex,
+          expressions,
           summary,
-          keyPoints
-        }
+          keyPoints,
+        },
       };
     }
   );
@@ -84,36 +123,46 @@ function createGraphServer() {
     {
       title: "Estudiar y graficar función",
       description:
-        "Analiza brevemente una función y la muestra en Desmos. Usa esta tool cuando el usuario pida estudiar, analizar o explicar una función además de graficarla.",
+        "Analiza brevemente una o varias funciones y las muestra en Desmos.",
       inputSchema: {
-        latex: z.string().min(1),
-        title: z.string().min(1),
-        summary: z.string().min(1),
-        keyPoints: z.array(z.string()).min(1)
+        title: z.string().optional(),
+        summary: z.string().optional(),
+        keyPoints: z.array(z.string()).optional(),
+        latex: z.string().optional(),
+        expressions: z
+          .array(
+            z.object({
+              id: z.string().optional(),
+              latex: z.string().min(1),
+              color: z.string().optional(),
+              hidden: z.boolean().optional(),
+            })
+          )
+          .optional(),
       },
       _meta: {
-        ui: { resourceUri: "ui://widget/graph.html" }
-      }
+        ui: { resourceUri: "ui://widget/graph.html" },
+      },
     },
     async (args) => {
-      const latex = args.latex.trim();
-      const title = args.title.trim();
-      const summary = args.summary.trim();
-      const keyPoints = args.keyPoints;
+      const title = args?.title?.trim?.() || "Estudio de función";
+      const summary = args?.summary?.trim?.() || "";
+      const keyPoints = Array.isArray(args?.keyPoints) ? args.keyPoints : [];
+      const expressions = normalizeExpressionsFromArgs(args);
 
       return {
         content: [
           {
             type: "text",
-            text: `Mostrando el estudio de ${latex}`
-          }
+            text: `Mostrando el estudio de ${expressions.length} expresión(es)`,
+          },
         ],
         structuredContent: {
           title,
-          latex,
+          expressions,
           summary,
-          keyPoints
-        }
+          keyPoints,
+        },
       };
     }
   );
