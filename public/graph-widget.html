@@ -18,9 +18,24 @@
         padding: 12px;
       }
 
-      h2 {
-        margin: 0 0 10px 0;
-        font-size: 16px;
+      #layout {
+        display: grid;
+        grid-template-columns: 1.5fr 1fr;
+        gap: 12px;
+        align-items: start;
+      }
+
+      @media (max-width: 900px) {
+        #layout {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      .card {
+        border: 1px solid #e5e7eb;
+        border-radius: 14px;
+        padding: 12px;
+        background: #fff;
       }
 
       #calculator {
@@ -30,28 +45,74 @@
         overflow: hidden;
       }
 
+      #title {
+        margin: 0 0 8px 0;
+        font-size: 18px;
+      }
+
       #status {
         margin: 0 0 10px 0;
         font-size: 13px;
         color: #4b5563;
       }
+
+      #summary {
+        margin: 0 0 10px 0;
+        line-height: 1.4;
+        color: #111827;
+      }
+
+      #points {
+        margin: 0;
+        padding-left: 18px;
+      }
+
+      #points li {
+        margin-bottom: 6px;
+      }
+
+      .muted {
+        color: #6b7280;
+      }
     </style>
 
-    <script src="https://www.desmos.com/api/v1.11/calculator.js?apiKey=d88e669a4d98463499db0b986f441223&lang=es"></script>
+    <script src="https://www.desmos.com/api/v1.11/calculator.js?apiKey=TU_API_KEY_DESMOS&lang=es"></script>
   </head>
   <body>
     <div id="wrap">
-      <h2>Gráfica en Desmos</h2>
-      <div id="status">Esperando expresión…</div>
-      <div id="calculator"></div>
+      <div id="layout">
+        <div class="card">
+          <h2 id="title">Gráfica</h2>
+          <div id="status">Esperando datos…</div>
+          <div id="calculator"></div>
+        </div>
+
+        <div class="card">
+          <h3 style="margin-top: 0;">Resumen</h3>
+          <p id="summary" class="muted">Aquí aparecerá una explicación breve.</p>
+
+          <h3>Puntos clave</h3>
+          <ul id="points">
+            <li class="muted">Aquí aparecerán los puntos clave.</li>
+          </ul>
+        </div>
+      </div>
     </div>
 
     <script type="module">
+      const titleEl = document.getElementById("title");
       const statusEl = document.getElementById("status");
+      const summaryEl = document.getElementById("summary");
+      const pointsEl = document.getElementById("points");
       const calculatorEl = document.getElementById("calculator");
 
       let calculator = null;
-      let currentLatex = "y=x^2";
+      let currentData = {
+        title: "Gráfica",
+        latex: "y=x^2",
+        summary: "",
+        keyPoints: []
+      };
 
       function ensureCalculator() {
         if (!calculator) {
@@ -63,20 +124,53 @@
       function renderGraph(latex) {
         const calc = ensureCalculator();
         calc.setExpression({ id: "main", latex });
-        statusEl.textContent = `Mostrando: ${latex}`;
+      }
+
+      function renderInfo(data) {
+        titleEl.textContent = data.title || "Gráfica";
+        statusEl.textContent = `Mostrando: ${data.latex || "y=x^2"}`;
+
+        if (data.summary && data.summary.trim()) {
+          summaryEl.textContent = data.summary;
+          summaryEl.classList.remove("muted");
+        } else {
+          summaryEl.textContent = "Aquí aparecerá una explicación breve.";
+          summaryEl.classList.add("muted");
+        }
+
+        pointsEl.innerHTML = "";
+        if (Array.isArray(data.keyPoints) && data.keyPoints.length > 0) {
+          data.keyPoints.forEach((point) => {
+            const li = document.createElement("li");
+            li.textContent = point;
+            pointsEl.appendChild(li);
+          });
+        } else {
+          const li = document.createElement("li");
+          li.textContent = "Aquí aparecerán los puntos clave.";
+          li.classList.add("muted");
+          pointsEl.appendChild(li);
+        }
+      }
+
+      function renderAll() {
+        renderGraph(currentData.latex || "y=x^2");
+        renderInfo(currentData);
       }
 
       function updateFromResponse(response) {
-        const latex =
-          response?.structuredContent?.latex ||
-          response?.structuredContent?.expression ||
-          "y=x^2";
+        const sc = response?.structuredContent || {};
 
-        currentLatex = latex;
-        renderGraph(currentLatex);
+        currentData = {
+          title: sc.title || "Gráfica",
+          latex: sc.latex || sc.expression || "y=x^2",
+          summary: sc.summary || "",
+          keyPoints: Array.isArray(sc.keyPoints) ? sc.keyPoints : []
+        };
+
+        renderAll();
       }
 
-      // MCP Apps bridge
       let rpcId = 0;
       const pendingRequests = new Map();
 
@@ -98,7 +192,6 @@
           const message = event.data;
           if (!message || message.jsonrpc !== "2.0") return;
 
-          // Respuestas
           if (typeof message.id === "number") {
             const pending = pendingRequests.get(message.id);
             if (!pending) return;
@@ -113,8 +206,6 @@
             return;
           }
 
-          // Notificaciones
-          if (typeof message.method !== "string") return;
           if (message.method === "ui/notifications/tool-result") {
             updateFromResponse(message.params);
           }
@@ -123,14 +214,10 @@
       );
 
       async function initializeBridge() {
-        const appInfo = { name: "desmos-widget", version: "0.1.0" };
-        const appCapabilities = {};
-        const protocolVersion = "2026-01-26";
-
         await rpcRequest("ui/initialize", {
-          appInfo,
-          appCapabilities,
-          protocolVersion,
+          appInfo: { name: "desmos-widget", version: "0.2.0" },
+          appCapabilities: {},
+          protocolVersion: "2026-01-26"
         });
 
         rpcNotify("ui/notifications/initialized", {});
@@ -139,7 +226,7 @@
       async function boot() {
         try {
           await initializeBridge();
-          renderGraph(currentLatex);
+          renderAll();
         } catch (err) {
           console.error(err);
           statusEl.textContent = "Error inicializando el widget.";
