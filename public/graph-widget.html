@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <title>Desmos Graph Widget</title>
+    <style>
+      html, body {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        min-height: 100%;
+        font-family: system-ui, -apple-system, sans-serif;
+        background: #ffffff;
+        color: #111827;
+      }
+
+      #wrap {
+        padding: 12px;
+      }
+
+      h2 {
+        margin: 0 0 10px 0;
+        font-size: 16px;
+      }
+
+      #calculator {
+        width: 100%;
+        height: 520px;
+        border-radius: 12px;
+        overflow: hidden;
+      }
+
+      #status {
+        margin: 0 0 10px 0;
+        font-size: 13px;
+        color: #4b5563;
+      }
+    </style>
+
+    <script src="https://www.desmos.com/api/v1.11/calculator.js?apiKey=d88e669a4d98463499db0b986f441223&lang=es"></script>
+  </head>
+  <body>
+    <div id="wrap">
+      <h2>Gráfica en Desmos</h2>
+      <div id="status">Esperando expresión…</div>
+      <div id="calculator"></div>
+    </div>
+
+    <script type="module">
+      const statusEl = document.getElementById("status");
+      const calculatorEl = document.getElementById("calculator");
+
+      let calculator = null;
+      let currentLatex = "y=x^2";
+
+      function ensureCalculator() {
+        if (!calculator) {
+          calculator = Desmos.GraphingCalculator(calculatorEl);
+        }
+        return calculator;
+      }
+
+      function renderGraph(latex) {
+        const calc = ensureCalculator();
+        calc.setExpression({ id: "main", latex });
+        statusEl.textContent = `Mostrando: ${latex}`;
+      }
+
+      function updateFromResponse(response) {
+        const latex =
+          response?.structuredContent?.latex ||
+          response?.structuredContent?.expression ||
+          "y=x^2";
+
+        currentLatex = latex;
+        renderGraph(currentLatex);
+      }
+
+      // MCP Apps bridge
+      let rpcId = 0;
+      const pendingRequests = new Map();
+
+      const rpcNotify = (method, params) => {
+        window.parent.postMessage({ jsonrpc: "2.0", method, params }, "*");
+      };
+
+      const rpcRequest = (method, params) =>
+        new Promise((resolve, reject) => {
+          const id = ++rpcId;
+          pendingRequests.set(id, { resolve, reject });
+          window.parent.postMessage({ jsonrpc: "2.0", id, method, params }, "*");
+        });
+
+      window.addEventListener(
+        "message",
+        (event) => {
+          if (event.source !== window.parent) return;
+          const message = event.data;
+          if (!message || message.jsonrpc !== "2.0") return;
+
+          // Respuestas
+          if (typeof message.id === "number") {
+            const pending = pendingRequests.get(message.id);
+            if (!pending) return;
+            pendingRequests.delete(message.id);
+
+            if (message.error) {
+              pending.reject(message.error);
+              return;
+            }
+
+            pending.resolve(message.result);
+            return;
+          }
+
+          // Notificaciones
+          if (typeof message.method !== "string") return;
+          if (message.method === "ui/notifications/tool-result") {
+            updateFromResponse(message.params);
+          }
+        },
+        { passive: true }
+      );
+
+      async function initializeBridge() {
+        const appInfo = { name: "desmos-widget", version: "0.1.0" };
+        const appCapabilities = {};
+        const protocolVersion = "2026-01-26";
+
+        await rpcRequest("ui/initialize", {
+          appInfo,
+          appCapabilities,
+          protocolVersion,
+        });
+
+        rpcNotify("ui/notifications/initialized", {});
+      }
+
+      async function boot() {
+        try {
+          await initializeBridge();
+          renderGraph(currentLatex);
+        } catch (err) {
+          console.error(err);
+          statusEl.textContent = "Error inicializando el widget.";
+        }
+      }
+
+      boot();
+    </script>
+  </body>
+</html>
